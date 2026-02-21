@@ -2,32 +2,47 @@ export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'declined'
 
 export type CurrencyCode = 'USD' | 'EUR' | 'GBP'
 
-export interface QuoteLineItem {
-  description: string
+export type ProjectType =
+  | 'website'
+  | 'mobile-app'
+  | 'branding'
+  | 'marketing'
+  | 'other'
+
+export interface ClientInfo {
+  name: string
+  email: string
+  company?: string
+}
+
+export interface LineItem {
   id: string
-  quantity: number
-  total: number
+  description: string
+  qty: number
   unitPrice: number
 }
 
 export interface QuoteTotals {
   subtotal: number
-  taxAmount: number
-  taxRate: number
+  tax: number
+  discount: number
   total: number
 }
 
 export interface Quote {
-  clientName: string
-  createdAt: string
-  currency: CurrencyCode
   id: string
-  lineItems: QuoteLineItem[]
-  notes?: string
-  projectName: string
-  status: QuoteStatus
+  client: ClientInfo
+  scope: {
+    description: string
+    desiredStartDate: string
+    projectType: ProjectType
+  }
+  currency: CurrencyCode
+  lineItems: LineItem[]
+  taxRate: number
+  discountRate: number
   totals: QuoteTotals
+  status: QuoteStatus
+  createdAt: string
   updatedAt: string
 }
-
-export type NewQuoteInput = Omit<Quote, 'createdAt' | 'id' | 'updatedAt'>
