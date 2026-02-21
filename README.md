@@ -1,6 +1,6 @@
 # Client Quote Generator
 
-Live Demo: https://REPLACE_ME.netlify.app  
+Live Demo: https://client-quote-generator.netlify.app/  
 GitHub: https://github.com/DevCalebR/client-quote-generator
 
 Client intake wizard and quote workflow portfolio project built with React + TypeScript + Vite.
