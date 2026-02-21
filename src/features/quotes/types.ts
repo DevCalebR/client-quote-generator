@@ -1,6 +1,6 @@
 export type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'declined'
 
-export type CurrencyCode = 'USD' | 'EUR' | 'GBP'
+export type CurrencyCode = 'USD' | 'EUR' | 'GBP' | 'CAD' | 'AUD' | 'JPY'
 
 export type ProjectType =
   | 'website'

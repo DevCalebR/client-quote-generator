@@ -3,8 +3,10 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
+import { getRate } from '../features/fx/rates'
 import { deleteQuote, getQuote, saveQuote } from '../features/quotes/storage'
 import type { Quote } from '../features/quotes/types'
+import { getSettings } from '../features/settings/storage'
 import { formatCurrency, formatDate, formatQuoteCode, getStatusVariant } from '../lib/format'
 
 type DetailState =
@@ -13,10 +15,19 @@ type DetailState =
   | { kind: 'missing' }
   | { kind: 'ready'; quote: Quote }
 
+type ConversionState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'ready'; asOf: string; convertedTotal: number; rate: number }
+  | { kind: 'error'; message: string }
+
 export function QuoteDetailPage() {
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
+  const [settings] = useState(() => getSettings())
+
   const [detailState, setDetailState] = useState<DetailState>({ kind: 'loading' })
+  const [conversionState, setConversionState] = useState<ConversionState>({ kind: 'idle' })
   const [actionError, setActionError] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isDuplicating, setIsDuplicating] = useState(false)
@@ -41,6 +52,42 @@ export function QuoteDetailPage() {
       setDetailState({ kind: 'error' })
     }
   }, [id])
+
+  useEffect(() => {
+    if (detailState.kind !== 'ready') {
+      setConversionState({ kind: 'idle' })
+      return
+    }
+
+    if (detailState.quote.currency === settings.clientCurrency) {
+      setConversionState({ kind: 'idle' })
+      return
+    }
+
+    void fetchConversion(detailState.quote)
+  }, [detailState, settings.clientCurrency])
+
+  async function fetchConversion(quote: Quote, forceRefresh = false) {
+    setConversionState({ kind: 'loading' })
+
+    try {
+      const { asOf, rate } = await getRate(quote.currency, settings.clientCurrency, {
+        forceRefresh,
+      })
+
+      setConversionState({
+        kind: 'ready',
+        asOf,
+        rate,
+        convertedTotal: roundCurrency(quote.totals.total * rate),
+      })
+    } catch (error) {
+      setConversionState({
+        kind: 'error',
+        message: getErrorMessage(error),
+      })
+    }
+  }
 
   function handleDuplicate() {
     if (detailState.kind !== 'ready') {
@@ -100,6 +147,9 @@ export function QuoteDetailPage() {
       setIsDeleting(false)
     }
   }
+
+  const shouldShowConversion =
+    detailState.kind === 'ready' && detailState.quote.currency !== settings.clientCurrency
 
   return (
     <section className="page">
@@ -242,6 +292,39 @@ export function QuoteDetailPage() {
                 <strong>{formatCurrency(detailState.quote.totals.total, detailState.quote.currency)}</strong>
               </p>
             </div>
+
+            {shouldShowConversion ? (
+              <div className="fx-preview">
+                {conversionState.kind === 'loading' ? <p className="muted">Fetching rate...</p> : null}
+
+                {conversionState.kind === 'ready' ? (
+                  <>
+                    <p>
+                      Converted total:{' '}
+                      <strong>{formatCurrency(conversionState.convertedTotal, settings.clientCurrency)}</strong>
+                    </p>
+                    <p className="muted">
+                      1 {detailState.quote.currency} = {conversionState.rate.toFixed(4)}{' '}
+                      {settings.clientCurrency} as of {conversionState.asOf}
+                    </p>
+                  </>
+                ) : null}
+
+                {conversionState.kind === 'error' ? (
+                  <div className="fx-preview__error">
+                    <p className="field-error">Conversion unavailable.</p>
+                    <Button
+                      variant="ghost"
+                      onClick={() => void fetchConversion(detailState.quote, true)}
+                      disabled={isDeleting || isDuplicating}
+                    >
+                      Retry
+                    </Button>
+                    <p className="muted">{conversionState.message}</p>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </Card>
         </>
       ) : null}
@@ -263,6 +346,18 @@ function getProjectTypeLabel(projectType: Quote['scope']['projectType']) {
     default:
       return 'Website'
   }
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+
+  return 'Conversion unavailable right now. Please try again.'
+}
+
+function roundCurrency(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
 function buildId(prefix: string) {

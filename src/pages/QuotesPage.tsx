@@ -7,6 +7,7 @@ import { Input } from '../components/ui/Input'
 import { Select } from '../components/ui/Select'
 import { listQuotes } from '../features/quotes/storage'
 import type { Quote, QuoteStatus } from '../features/quotes/types'
+import { getSettings } from '../features/settings/storage'
 import { formatCurrency, formatDate, formatQuoteCode, getStatusVariant } from '../lib/format'
 
 type QuotesState =
@@ -17,6 +18,7 @@ type QuotesState =
 type StatusFilter = QuoteStatus | 'all'
 
 export function QuotesPage() {
+  const [settings] = useState(() => getSettings())
   const [quotesState, setQuotesState] = useState<QuotesState>({ kind: 'loading' })
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -67,6 +69,14 @@ export function QuotesPage() {
         <div>
           <h1>Quotes</h1>
           <p>Search and review all saved quotes in local storage.</p>
+          {settings.baseCurrency !== settings.clientCurrency ? (
+            <p className="muted">
+              <Badge variant="neutral">
+                {settings.baseCurrency} to {settings.clientCurrency}
+              </Badge>{' '}
+              active
+            </p>
+          ) : null}
         </div>
         <Button onClick={hydrateQuotes} variant="ghost">
           Refresh
