@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFieldArray, useForm, type FieldPath } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 import { z } from 'zod'
@@ -9,9 +9,11 @@ import { Card } from '../components/ui/Card'
 import { Input } from '../components/ui/Input'
 import { Select } from '../components/ui/Select'
 import { Textarea } from '../components/ui/Textarea'
+import { getRate } from '../features/fx/rates'
 import { calculateTotals } from '../features/quotes/calc'
 import { saveQuote } from '../features/quotes/storage'
-import type { ProjectType, Quote } from '../features/quotes/types'
+import type { CurrencyCode, ProjectType, Quote } from '../features/quotes/types'
+import { getSettings } from '../features/settings/storage'
 import { formatCurrency } from '../lib/format'
 
 const projectTypeValues = ['website', 'mobile-app', 'branding', 'marketing', 'other'] as const
@@ -54,21 +56,16 @@ const intakeSchema = z.object({
 
 type IntakeFormValues = z.infer<typeof intakeSchema>
 
-const defaultValues: IntakeFormValues = {
-  client: {
-    name: '',
-    email: '',
-    company: '',
-  },
-  scope: {
-    projectType: 'website',
-    description: '',
-    desiredStartDate: '',
-  },
-  lineItems: [{ description: '', qty: 1, unitPrice: 0 }],
-  taxRate: 8,
-  discount: 0,
-}
+type ConversionState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | {
+      kind: 'ready'
+      asOf: string
+      convertedTotal: number
+      rate: number
+    }
+  | { kind: 'error'; message: string }
 
 const stepFields: Array<FieldPath<IntakeFormValues>[]> = [
   ['client.name', 'client.email', 'client.company'],
@@ -98,8 +95,33 @@ const steps = [
 
 export function IntakePage() {
   const navigate = useNavigate()
+  const [settings] = useState(() => getSettings())
+  const baseCurrency = settings.baseCurrency
+  const clientCurrency = settings.clientCurrency
+  const shouldShowConversion = baseCurrency !== clientCurrency
+
   const [activeStep, setActiveStep] = useState(0)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [conversionState, setConversionState] = useState<ConversionState>({ kind: 'idle' })
+
+  const initialValues = useMemo<IntakeFormValues>(
+    () => ({
+      client: {
+        name: '',
+        email: '',
+        company: '',
+      },
+      scope: {
+        projectType: 'website',
+        description: '',
+        desiredStartDate: '',
+      },
+      lineItems: [{ description: '', qty: 1, unitPrice: 0 }],
+      taxRate: settings.taxRateDefault ?? 8,
+      discount: 0,
+    }),
+    [settings.taxRateDefault],
+  )
 
   const {
     control,
@@ -109,7 +131,7 @@ export function IntakePage() {
     trigger,
     watch,
   } = useForm<IntakeFormValues>({
-    defaultValues,
+    defaultValues: initialValues,
     resolver: zodResolver(intakeSchema),
   })
 
@@ -127,6 +149,44 @@ export function IntakePage() {
     () => calculateTotals(watchedLineItems ?? [], watchedTaxRate ?? 0, watchedDiscount ?? 0),
     [watchedDiscount, watchedLineItems, watchedTaxRate],
   )
+
+  const loadConversion = useCallback(
+    async (forceRefresh = false) => {
+      if (!shouldShowConversion) {
+        setConversionState({ kind: 'idle' })
+        return
+      }
+
+      setConversionState({ kind: 'loading' })
+
+      try {
+        const { asOf, rate } = await getRate(baseCurrency, clientCurrency, {
+          forceRefresh,
+        })
+
+        setConversionState({
+          kind: 'ready',
+          asOf,
+          rate,
+          convertedTotal: roundCurrency(liveTotals.total * rate),
+        })
+      } catch (error) {
+        setConversionState({
+          kind: 'error',
+          message: getErrorMessage(error),
+        })
+      }
+    },
+    [baseCurrency, clientCurrency, liveTotals.total, shouldShowConversion],
+  )
+
+  useEffect(() => {
+    if (activeStep !== 3) {
+      return
+    }
+
+    void loadConversion()
+  }, [activeStep, loadConversion])
 
   const isLastStep = activeStep === steps.length - 1
 
@@ -165,7 +225,7 @@ export function IntakePage() {
           description: values.scope.description.trim(),
           desiredStartDate: values.scope.desiredStartDate,
         },
-        currency: 'USD',
+        currency: baseCurrency,
         lineItems,
         taxRate: values.taxRate,
         discountRate: values.discount,
@@ -320,8 +380,12 @@ export function IntakePage() {
                 Add Line Item
               </Button>
 
-              <Card className="card--inset" title="Live Totals Preview">
-                <TotalsBreakdown subtotalLabel="Current Subtotal" totals={liveTotals} />
+              <Card className="card--inset" title={`Live Totals Preview (${baseCurrency})`}>
+                <TotalsBreakdown
+                  subtotalLabel="Current Subtotal"
+                  totals={liveTotals}
+                  currency={baseCurrency}
+                />
               </Card>
             </>
           ) : null}
@@ -368,8 +432,45 @@ export function IntakePage() {
                 </Card>
               </div>
 
-              <Card className="card--inset" title="Final Totals (USD)">
-                <TotalsBreakdown subtotalLabel="Subtotal" totals={liveTotals} />
+              <Card className="card--inset" title={`Final Totals (${baseCurrency})`}>
+                <TotalsBreakdown subtotalLabel="Subtotal" totals={liveTotals} currency={baseCurrency} />
+
+                {shouldShowConversion ? (
+                  <div className="fx-preview">
+                    <p className="muted">Client currency preview: {clientCurrency}</p>
+
+                    {conversionState.kind === 'loading' ? (
+                      <p className="muted">Fetching rate...</p>
+                    ) : null}
+
+                    {conversionState.kind === 'ready' ? (
+                      <>
+                        <p>
+                          Converted total:{' '}
+                          <strong>{formatCurrency(conversionState.convertedTotal, clientCurrency)}</strong>
+                        </p>
+                        <p className="muted">
+                          1 {baseCurrency} = {conversionState.rate.toFixed(4)} {clientCurrency} as of{' '}
+                          {conversionState.asOf}
+                        </p>
+                      </>
+                    ) : null}
+
+                    {conversionState.kind === 'error' ? (
+                      <div className="fx-preview__error">
+                        <p className="field-error">Conversion unavailable.</p>
+                        <Button
+                          variant="ghost"
+                          onClick={() => void loadConversion(true)}
+                          disabled={isSubmitting}
+                        >
+                          Retry
+                        </Button>
+                        <p className="muted">{conversionState.message}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </Card>
             </>
           ) : null}
@@ -406,26 +507,27 @@ interface TotalsBreakdownProps {
     discount: number
     total: number
   }
+  currency: CurrencyCode
 }
 
-function TotalsBreakdown({ subtotalLabel, totals }: TotalsBreakdownProps) {
+function TotalsBreakdown({ subtotalLabel, totals, currency }: TotalsBreakdownProps) {
   return (
     <div className="totals">
       <p>
         <span>{subtotalLabel}</span>
-        <strong>{formatCurrency(totals.subtotal, 'USD')}</strong>
+        <strong>{formatCurrency(totals.subtotal, currency)}</strong>
       </p>
       <p>
         <span>Tax</span>
-        <strong>{formatCurrency(totals.tax, 'USD')}</strong>
+        <strong>{formatCurrency(totals.tax, currency)}</strong>
       </p>
       <p>
         <span>Discount</span>
-        <strong>-{formatCurrency(totals.discount, 'USD')}</strong>
+        <strong>-{formatCurrency(totals.discount, currency)}</strong>
       </p>
       <p>
         <span>Total</span>
-        <strong>{formatCurrency(totals.total, 'USD')}</strong>
+        <strong>{formatCurrency(totals.total, currency)}</strong>
       </p>
     </div>
   )
@@ -445,6 +547,18 @@ function getProjectTypeLabel(projectType: ProjectType) {
     default:
       return 'Website'
   }
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+
+  return 'Conversion unavailable right now. Please try again.'
+}
+
+function roundCurrency(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
 function buildId(prefix: string) {

@@ -167,7 +167,14 @@ function isQuoteTotals(value: unknown): value is QuoteTotals {
 }
 
 function isCurrencyCode(value: unknown): value is CurrencyCode {
-  return value === 'USD' || value === 'EUR' || value === 'GBP'
+  return (
+    value === 'USD' ||
+    value === 'EUR' ||
+    value === 'GBP' ||
+    value === 'CAD' ||
+    value === 'AUD' ||
+    value === 'JPY'
+  )
 }
 
 function isQuoteStatus(value: unknown): value is QuoteStatus {
