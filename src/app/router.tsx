@@ -29,7 +29,28 @@ export const router = createBrowserRouter([
         },
       },
       {
+        path: 'runs',
+        lazy: async () => {
+          const module = await import('../pages/QuotesPage')
+          return { Component: module.QuotesPage }
+        },
+      },
+      {
+        path: 'runs/new',
+        lazy: async () => {
+          const module = await import('../pages/IntakePage')
+          return { Component: module.IntakePage }
+        },
+      },
+      {
         path: 'quote/:id',
+        lazy: async () => {
+          const module = await import('../pages/QuoteDetailPage')
+          return { Component: module.QuoteDetailPage }
+        },
+      },
+      {
+        path: 'runs/:id',
         lazy: async () => {
           const module = await import('../pages/QuoteDetailPage')
           return { Component: module.QuoteDetailPage }
