@@ -95,6 +95,11 @@ a {
   color: #172b4d;
 }
 
+.top-nav__link:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary), transparent 60%);
+  outline-offset: 2px;
+}
+
 .top-nav__link--active {
   background: var(--primary-soft);
   color: var(--primary);
@@ -256,6 +261,11 @@ textarea.field-control {
   opacity: 0.65;
 }
 
+.btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary), transparent 65%);
+  outline-offset: 2px;
+}
+
 .btn--full {
   width: 100%;
 }
@@ -296,6 +306,73 @@ textarea.field-control {
 
 .inline-link:hover {
   text-decoration: underline;
+}
+
+.inline-link:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid color-mix(in srgb, var(--primary), transparent 65%);
+  outline-offset: 2px;
+}
+
+.wizard-steps {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wizard-steps__item {
+  align-items: flex-start;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.55rem 0.6rem;
+}
+
+.wizard-steps__item--active {
+  background: var(--primary-soft);
+  border-color: color-mix(in srgb, var(--primary), white 50%);
+}
+
+.wizard-steps__index {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: #344054;
+  display: inline-flex;
+  font-size: 0.75rem;
+  font-weight: 700;
+  height: 1.4rem;
+  justify-content: center;
+  min-width: 1.4rem;
+}
+
+.wizard-steps__title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.wizard-steps__description {
+  color: var(--ink-soft);
+  font-size: 0.73rem;
+  margin: 0;
+}
+
+.wizard-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.5rem;
+}
+
+.line-item__actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .badge {
@@ -414,6 +491,10 @@ textarea.field-control {
   .grid--2,
   .grid--3 {
     grid-template-columns: 1fr;
+  }
+
+  .wizard-steps {
+    grid-template-columns: 1fr 1fr;
   }
 
   .page__header--row {

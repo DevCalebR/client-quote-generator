@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Card } from '../components/ui/Card'
-import { getQuoteById } from '../features/quotes/storage'
+import { deleteQuote, getQuote, saveQuote } from '../features/quotes/storage'
 import type { Quote } from '../features/quotes/types'
 import { formatCurrency, formatDate, formatQuoteCode, getStatusVariant } from '../lib/format'
 
@@ -14,8 +14,12 @@ type DetailState =
   | { kind: 'ready'; quote: Quote }
 
 export function QuoteDetailPage() {
+  const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
   const [detailState, setDetailState] = useState<DetailState>({ kind: 'loading' })
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isDuplicating, setIsDuplicating] = useState(false)
 
   useEffect(() => {
     if (!id) {
@@ -26,7 +30,7 @@ export function QuoteDetailPage() {
     setDetailState({ kind: 'loading' })
 
     try {
-      const quote = getQuoteById(id)
+      const quote = getQuote(id)
       if (!quote) {
         setDetailState({ kind: 'missing' })
         return
@@ -38,34 +42,97 @@ export function QuoteDetailPage() {
     }
   }, [id])
 
+  function handleDuplicate() {
+    if (detailState.kind !== 'ready') {
+      return
+    }
+
+    setActionError(null)
+    setIsDuplicating(true)
+
+    try {
+      const now = new Date().toISOString()
+      const duplicated: Quote = {
+        ...detailState.quote,
+        id: buildId('quote'),
+        lineItems: detailState.quote.lineItems.map((lineItem) => ({
+          ...lineItem,
+          id: buildId('line-item'),
+        })),
+        status: 'draft',
+        createdAt: now,
+        updatedAt: now,
+      }
+
+      const savedQuote = saveQuote(duplicated)
+      navigate(`/quote/${savedQuote.id}`)
+    } catch {
+      setActionError('Could not duplicate this quote. Please try again.')
+    } finally {
+      setIsDuplicating(false)
+    }
+  }
+
+  function handleDelete() {
+    if (!id || detailState.kind !== 'ready') {
+      return
+    }
+
+    const confirmed = window.confirm('Delete this quote? This action cannot be undone.')
+    if (!confirmed) {
+      return
+    }
+
+    setActionError(null)
+    setIsDeleting(true)
+
+    try {
+      const deleted = deleteQuote(id)
+      if (!deleted) {
+        setActionError('This quote no longer exists.')
+        return
+      }
+
+      navigate('/quotes')
+    } catch {
+      setActionError('Could not delete this quote. Please try again.')
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   return (
     <section className="page">
       <header className="page__header page__header--row">
         <div>
           <h1>Quote Detail</h1>
-          <p>Inspect saved quote metadata and line items.</p>
+          <p>Review quote details, totals, and metadata.</p>
         </div>
-        <Link className="inline-link" to="/quotes">
-          Back to quotes
-        </Link>
+        <div className="row-actions">
+          <Link className="inline-link" to="/quotes">
+            Back to Quotes
+          </Link>
+          <Button variant="ghost" onClick={handleDuplicate} disabled={isDuplicating || isDeleting}>
+            {isDuplicating ? 'Duplicating...' : 'Duplicate Quote'}
+          </Button>
+          <Button variant="danger" onClick={handleDelete} disabled={isDeleting || isDuplicating}>
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </div>
       </header>
 
       {detailState.kind === 'loading' ? (
-        <Card
-          className="placeholder-card"
-          title="Loading Quote"
-          description="Fetching quote details..."
-        />
+        <Card className="placeholder-card" title="Loading Quote" description="Fetching quote details..." />
       ) : null}
 
       {detailState.kind === 'error' ? (
         <Card
           className="placeholder-card"
           title="Unable to Load Quote"
-          description="An unexpected error occurred while reading the quote."
+          description="An unexpected error occurred while loading this quote."
           footer={
-            <Link to="/quotes">
-              <Button>Return to list</Button>
+            <Link className="inline-link" to="/quotes">
+              Return to quote list
             </Link>
           }
         />
@@ -75,20 +142,26 @@ export function QuoteDetailPage() {
         <Card
           className="placeholder-card"
           title="Quote Not Found"
-          description="This quote ID does not exist in local storage."
+          description="The quote ID in this URL does not exist."
           footer={
             <Link className="inline-link" to="/quotes">
-              Browse existing quotes
+              Browse saved quotes
             </Link>
           }
         />
       ) : null}
 
+      {actionError ? (
+        <Card className="placeholder-card" title="Action Error" description={actionError} />
+      ) : null}
+
       {detailState.kind === 'ready' ? (
         <>
           <Card
-            title={`${detailState.quote.clientName} - ${detailState.quote.projectName}`}
-            description={`Created ${formatDate(detailState.quote.createdAt)} · ${formatQuoteCode(detailState.quote.id)}`}
+            title={detailState.quote.client.company
+              ? `${detailState.quote.client.name} · ${detailState.quote.client.company}`
+              : detailState.quote.client.name}
+            description={`${formatQuoteCode(detailState.quote.id)} · Created ${formatDate(detailState.quote.createdAt)}`}
           >
             <div className="grid grid--3">
               <p>
@@ -99,25 +172,35 @@ export function QuoteDetailPage() {
                 </Badge>
               </p>
               <p>
-                <strong>Currency</strong>
+                <strong>Updated</strong>
                 <br />
-                {detailState.quote.currency}
+                {formatDate(detailState.quote.updatedAt)}
               </p>
               <p>
-                <strong>Total</strong>
+                <strong>Client Email</strong>
                 <br />
-                {formatCurrency(
-                  detailState.quote.totals.total,
-                  detailState.quote.currency,
-                )}
+                {detailState.quote.client.email}
               </p>
             </div>
-            {detailState.quote.notes ? (
-              <p className="muted">Notes: {detailState.quote.notes}</p>
-            ) : null}
           </Card>
 
-          <Card title="Line Items" description="Starter quote supports one or more line items.">
+          <Card title="Project Scope" description="Scope captured from the intake wizard.">
+            <div className="grid grid--2">
+              <p>
+                <strong>Project Type</strong>
+                <br />
+                {getProjectTypeLabel(detailState.quote.scope.projectType)}
+              </p>
+              <p>
+                <strong>Desired Start Date</strong>
+                <br />
+                {detailState.quote.scope.desiredStartDate}
+              </p>
+            </div>
+            <p className="muted">{detailState.quote.scope.description}</p>
+          </Card>
+
+          <Card title="Line Items">
             <div className="table-wrap">
               <table className="table">
                 <thead>
@@ -132,16 +215,9 @@ export function QuoteDetailPage() {
                   {detailState.quote.lineItems.map((lineItem) => (
                     <tr key={lineItem.id}>
                       <td>{lineItem.description}</td>
-                      <td>{lineItem.quantity}</td>
-                      <td>
-                        {formatCurrency(
-                          lineItem.unitPrice,
-                          detailState.quote.currency,
-                        )}
-                      </td>
-                      <td>
-                        {formatCurrency(lineItem.total, detailState.quote.currency)}
-                      </td>
+                      <td>{lineItem.qty}</td>
+                      <td>{formatCurrency(lineItem.unitPrice, detailState.quote.currency)}</td>
+                      <td>{formatCurrency(lineItem.qty * lineItem.unitPrice, detailState.quote.currency)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -151,30 +227,19 @@ export function QuoteDetailPage() {
             <div className="totals">
               <p>
                 <span>Subtotal</span>
-                <strong>
-                  {formatCurrency(
-                    detailState.quote.totals.subtotal,
-                    detailState.quote.currency,
-                  )}
-                </strong>
+                <strong>{formatCurrency(detailState.quote.totals.subtotal, detailState.quote.currency)}</strong>
               </p>
               <p>
-                <span>Tax ({detailState.quote.totals.taxRate}%)</span>
-                <strong>
-                  {formatCurrency(
-                    detailState.quote.totals.taxAmount,
-                    detailState.quote.currency,
-                  )}
-                </strong>
+                <span>Tax ({detailState.quote.taxRate}%)</span>
+                <strong>{formatCurrency(detailState.quote.totals.tax, detailState.quote.currency)}</strong>
+              </p>
+              <p>
+                <span>Discount ({detailState.quote.discountRate}%)</span>
+                <strong>-{formatCurrency(detailState.quote.totals.discount, detailState.quote.currency)}</strong>
               </p>
               <p>
                 <span>Total</span>
-                <strong>
-                  {formatCurrency(
-                    detailState.quote.totals.total,
-                    detailState.quote.currency,
-                  )}
-                </strong>
+                <strong>{formatCurrency(detailState.quote.totals.total, detailState.quote.currency)}</strong>
               </p>
             </div>
           </Card>
@@ -182,4 +247,28 @@ export function QuoteDetailPage() {
       ) : null}
     </section>
   )
+}
+
+function getProjectTypeLabel(projectType: Quote['scope']['projectType']) {
+  switch (projectType) {
+    case 'mobile-app':
+      return 'Mobile App'
+    case 'branding':
+      return 'Branding'
+    case 'marketing':
+      return 'Marketing'
+    case 'other':
+      return 'Other'
+    case 'website':
+    default:
+      return 'Website'
+  }
+}
+
+function buildId(prefix: string) {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}-${crypto.randomUUID()}`
+  }
+
+  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10_000)}`
 }

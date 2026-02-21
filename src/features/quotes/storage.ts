@@ -1,46 +1,63 @@
-import type { NewQuoteInput, Quote } from './types'
+import type {
+  ClientInfo,
+  CurrencyCode,
+  LineItem,
+  ProjectType,
+  Quote,
+  QuoteStatus,
+  QuoteTotals,
+} from './types'
 
-const STORAGE_KEY = 'client-quote-generator:quotes:v1'
+const STORAGE_KEY = 'client-quote-generator:quotes:v2'
 
-export function getQuotes(): Quote[] {
-  const quotes = readRawQuotes()
-  return quotes.sort((left, right) =>
-    left.createdAt < right.createdAt ? 1 : left.createdAt > right.createdAt ? -1 : 0,
-  )
+export function listQuotes(): Quote[] {
+  return readQuotes().sort((left, right) => {
+    const leftDate = Date.parse(left.updatedAt)
+    const rightDate = Date.parse(right.updatedAt)
+    return rightDate - leftDate
+  })
 }
 
-export function getQuoteById(quoteId: string): Quote | undefined {
-  return readRawQuotes().find((quote) => quote.id === quoteId)
+export function getQuote(id: string): Quote | undefined {
+  return readQuotes().find((quote) => quote.id === id)
 }
 
-export function createQuote(input: NewQuoteInput): Quote {
-  const timestamp = new Date().toISOString()
-  const quote: Quote = {
-    ...input,
-    createdAt: timestamp,
-    id: createId(),
-    updatedAt: timestamp,
+export function saveQuote(quote: Quote): Quote {
+  if (!isQuote(quote)) {
+    throw new Error('Invalid quote payload')
   }
 
-  const quotes = readRawQuotes()
-  quotes.push(quote)
-  writeRawQuotes(quotes)
-  return quote
+  const persistedQuote: Quote = {
+    ...quote,
+    updatedAt: new Date().toISOString(),
+  }
+
+  const quotes = readQuotes()
+  const existingIndex = quotes.findIndex((item) => item.id === persistedQuote.id)
+
+  if (existingIndex >= 0) {
+    quotes[existingIndex] = persistedQuote
+  } else {
+    quotes.push(persistedQuote)
+  }
+
+  writeQuotes(quotes)
+  return persistedQuote
 }
 
-export function deleteQuote(quoteId: string): boolean {
-  const quotes = readRawQuotes()
-  const filteredQuotes = quotes.filter((quote) => quote.id !== quoteId)
+export function deleteQuote(id: string): boolean {
+  const quotes = readQuotes()
+  const nextQuotes = quotes.filter((quote) => quote.id !== id)
 
-  if (filteredQuotes.length === quotes.length) {
+  if (nextQuotes.length === quotes.length) {
     return false
   }
 
-  writeRawQuotes(filteredQuotes)
+  writeQuotes(nextQuotes)
   return true
 }
 
-function readRawQuotes(): Quote[] {
+function readQuotes(): Quote[] {
   if (!isBrowser()) {
     return []
   }
@@ -51,33 +68,130 @@ function readRawQuotes(): Quote[] {
   }
 
   try {
-    const parsedValue: unknown = JSON.parse(serialized)
-    if (!Array.isArray(parsedValue)) {
+    const parsed: unknown = JSON.parse(serialized)
+    if (!Array.isArray(parsed)) {
       return []
     }
 
-    return parsedValue as Quote[]
+    return parsed.filter(isQuote)
   } catch {
     return []
   }
 }
 
-function writeRawQuotes(quotes: Quote[]) {
+function writeQuotes(quotes: Quote[]) {
   if (!isBrowser()) {
     return
   }
 
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(quotes))
-}
-
-function createId() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(quotes))
+  } catch {
+    // Ignore write failures to avoid crashing UI in private mode/quota issues.
   }
-
-  return `quote-${Date.now()}`
 }
 
 function isBrowser() {
   return typeof window !== 'undefined'
+}
+
+function isQuote(value: unknown): value is Quote {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    isString(value.id) &&
+    isClientInfo(value.client) &&
+    isScope(value.scope) &&
+    isCurrencyCode(value.currency) &&
+    Array.isArray(value.lineItems) &&
+    value.lineItems.every(isLineItem) &&
+    isNumber(value.taxRate) &&
+    isNumber(value.discountRate) &&
+    isQuoteTotals(value.totals) &&
+    isQuoteStatus(value.status) &&
+    isString(value.createdAt) &&
+    isString(value.updatedAt)
+  )
+}
+
+function isClientInfo(value: unknown): value is ClientInfo {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    isString(value.name) &&
+    isString(value.email) &&
+    (value.company === undefined || isString(value.company))
+  )
+}
+
+function isScope(value: unknown): value is Quote['scope'] {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    isProjectType(value.projectType) &&
+    isString(value.description) &&
+    isString(value.desiredStartDate)
+  )
+}
+
+function isLineItem(value: unknown): value is LineItem {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    isString(value.id) &&
+    isString(value.description) &&
+    isNumber(value.qty) &&
+    isNumber(value.unitPrice)
+  )
+}
+
+function isQuoteTotals(value: unknown): value is QuoteTotals {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    isNumber(value.subtotal) &&
+    isNumber(value.tax) &&
+    isNumber(value.discount) &&
+    isNumber(value.total)
+  )
+}
+
+function isCurrencyCode(value: unknown): value is CurrencyCode {
+  return value === 'USD' || value === 'EUR' || value === 'GBP'
+}
+
+function isQuoteStatus(value: unknown): value is QuoteStatus {
+  return value === 'draft' || value === 'sent' || value === 'accepted' || value === 'declined'
+}
+
+function isProjectType(value: unknown): value is ProjectType {
+  return (
+    value === 'website' ||
+    value === 'mobile-app' ||
+    value === 'branding' ||
+    value === 'marketing' ||
+    value === 'other'
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string'
+}
+
+function isNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
 }
